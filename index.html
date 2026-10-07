@@ -507,7 +507,20 @@ function enqueuePending(op) {
   updateSyncBadge();
 }
 
-function getSavedConfig() { try { return JSON.parse(localStorage.getItem('fbConfig')||'null'); } catch { return null; } }
+const DEFAULT_FB_CONFIG = {
+  apiKey: "AIzaSyCBJml3HDq6mx4j5SvDQDh8yl1kKXIL_MM",
+  authDomain: "power-maintenance-d128f.firebaseapp.com",
+  databaseURL: "https://power-maintenance-d128f-default-rtdb.firebaseio.com",
+  projectId: "power-maintenance-d128f",
+  storageBucket: "power-maintenance-d128f.firebasestorage.app",
+  messagingSenderId: "996340605253",
+  appId: "1:996340605253:web:73cc86ee7909e29fe3de2c"
+};
+// Pehle phone me saved config, nahi ho to built-in default (sab users ek hi Firebase se judenge)
+function getSavedConfig() {
+  try { const c = JSON.parse(localStorage.getItem('fbConfig')||'null'); if (c && c.apiKey) return c; } catch {}
+  return DEFAULT_FB_CONFIG;
+}
 
 function initFirebase() {
   const cfg = getSavedConfig();

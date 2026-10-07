@@ -1,5 +1,5 @@
 // App shell cache: app offline bhi khulega. Firebase data ka apna offline sync app me hai.
-const CACHE = 'power-maint-v3';
+const CACHE = 'power-maint-v4';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 const CDN = [
   'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
