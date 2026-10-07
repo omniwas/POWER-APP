@@ -664,7 +664,7 @@ function showFirebaseSetup() {
 }
 
 function getLocalReports() { try { return JSON.parse(localStorage.getItem('maintReports')||'[]'); } catch { return []; } }
-function getReports() { return reportsCache.length ? reportsCache : getLocalReports(); }
+function getReports() { return (reportsCache.length ? reportsCache : getLocalReports()).filter(r => !r.deleted); }
 
 function saveLocal(report) {
   const arr = getLocalReports();
@@ -711,6 +711,19 @@ async function updateReportField(id, fields) {
   } else if (cloudMode) {
     enqueuePending({ type: 'update', id, fields, ts: Date.now() });
   }
+}
+
+
+/* ---------- Single report delete (Admin only) ---------- */
+async function deleteReport(id) {
+  if (!requireAdmin()) return;
+  if (!confirm(lang==='hi' ? 'यह रिपोर्ट हमेशा के लिए हटाएं? सभी फोन से हट जाएगी।' : 'Delete this report permanently for all devices?')) return;
+  // Soft-delete marker: sab phones me sync hota hai, photo/signature hata kar jagah bhi khali
+  await updateReportField(id, { deleted: true, deletedAt: new Date().toISOString(), photo: null, signature: null, finalPhoto: null });
+  toast(lang==='hi' ? '🗑️ रिपोर्ट हटा दी' : '🗑️ Report deleted');
+  renderHome();
+  if (document.getElementById('allReports').classList.contains('active')) renderAllReports();
+  goTo('home');
 }
 
 async function deleteAllReports() {
@@ -1451,7 +1464,8 @@ function openReportDetail(id) {
         <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;margin-top:4px;margin-bottom:0">
           <input type="checkbox" ${r.jobOrderReceived?'checked':''} onchange="toggleJOReceived('${r.id}',this.checked);setTimeout(()=>openReportDetail('${r.id}'),200)" />
           ${t('joReceived')}
-        </label>` : `
+        </label>
+        <button class="btn btn-danger" style="margin-top:14px" onclick="deleteReport('${r.id}')">🗑️ ${lang==='hi'?'यह रिपोर्ट हटाएं (Delete)':'Delete this report'}</button>` : `
         <label>${t('joNumber')}</label><div class="readonly-value">${r.jobOrder || '—'}</div>
         <label>G-Schedule</label><div class="readonly-value">${r.gSchedule || '—'}</div>
         <div class="readonly-value">${r.jobOrderReceived ? '☑ '+t('joReceived') : '☐ '+(lang==='hi'?'Job Order अभी प्राप्त नहीं':'Job Order not received')}</div>`}
