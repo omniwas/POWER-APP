@@ -666,13 +666,32 @@ function showFirebaseSetup() {
 function getLocalReports() { try { return JSON.parse(localStorage.getItem('maintReports')||'[]'); } catch { return []; } }
 function getReports() { return (reportsCache.length ? reportsCache : getLocalReports()).filter(r => !r.deleted); }
 
+
 function saveLocal(report) {
-  const arr = getLocalReports();
-  const idx = arr.findIndex(r => r.id === report.id);
-  if (idx >= 0) arr[idx] = report; else arr.unshift(report);
-  localStorage.setItem('maintReports', JSON.stringify(arr));
-  reportsCache = arr;
+    const arr = getLocalReports();
+    const idx = arr.findIndex(r => r.id === report.id);
+
+    if (idx >= 0) {
+        arr[idx] = report;
+    } else {
+        arr.unshift(report);
+    }
+
+    reportsCache = arr;
+
+    try {
+        localStorage.setItem('maintReports', JSON.stringify(arr));
+    } catch (e) {
+        if (e.name === 'QuotaExceededError') {
+            console.warn(
+                'Local storage full. Report retained in memory; cloud save will be attempted.'
+            );
+            return;
+        }
+        throw e;
+    }
 }
+
 
 async function saveReportToCloud(report) {
   // Always save locally first (offline-first)
