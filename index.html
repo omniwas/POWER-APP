@@ -480,7 +480,12 @@ function getPendingQueue() {
   try { return JSON.parse(localStorage.getItem('pendingSync') || '[]'); } catch { return []; }
 }
 function setPendingQueue(q) {
-  localStorage.setItem('pendingSync', JSON.stringify(q));
+  try {
+    localStorage.setItem('pendingSync', JSON.stringify(q));
+  } catch (e) {
+    saveReportsToStorage(reportsCache.length ? reportsCache : getLocalReports(), 0);
+    try { localStorage.setItem('pendingSync', JSON.stringify(q)); } catch (err) { console.warn('pendingSync quota:', err); }
+  }
 }
 function enqueuePending(op) {
   // op: { type: 'set'|'update'|'remove', id, data, fields, ts }
@@ -546,12 +551,18 @@ function initFirebase() {
     db.ref('reports').on('value', snap => {
       const val = snap.val() || {};
       const remote = Object.keys(val).map(k => val[k]);
-      // Merge with any local-only pending items not yet on server
-      const local = getLocalReports();
-      const remoteIds = new Set(remote.map(r => r.id));
-      const pendingOnly = local.filter(r => !remoteIds.has(r.id));
+      // Merge with any local-only or in-memory pending items not yet on server
+      const localAndMem = [...reportsCache, ...getLocalReports()];
+      const seenIds = new Set(remote.map(r => r && r.id));
+      const pendingOnly = [];
+      for (const item of localAndMem) {
+        if (item && item.id && !seenIds.has(item.id)) {
+          seenIds.add(item.id);
+          pendingOnly.push(item);
+        }
+      }
       reportsCache = [...remote, ...pendingOnly].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
-      localStorage.setItem('maintReports', JSON.stringify(reportsCache));
+      saveReportsToStorage(reportsCache);
       renderHome();
       if (document.getElementById('allReports').classList.contains('active')) renderAllReports();
       if (document.getElementById('admin').classList.contains('active')) renderAdmin();
@@ -667,30 +678,60 @@ function showFirebaseSetup() {
 function getLocalReports() { try { return JSON.parse(localStorage.getItem('maintReports')||'[]'); } catch { return []; } }
 function getReports() { return (reportsCache.length ? reportsCache : getLocalReports()).filter(r => !r.deleted); }
 
+function saveReportsToStorage(arr, maxPhotoReports) {
+  const limits = typeof maxPhotoReports === 'number' ? [maxPhotoReports] : [10, 5, 2, 0];
+  for (const keepCount of limits) {
+    try {
+      const prepared = arr.map((r, idx) => {
+        if (idx < keepCount) return r;
+        const copy = Object.assign({}, r);
+        delete copy.photo;
+        delete copy.finalPhoto;
+        delete copy.signature;
+        return copy;
+      });
+      const serialized = JSON.stringify(prepared);
+      if (serialized.length > 3500000 && keepCount > 0) continue;
+      localStorage.setItem('maintReports', serialized);
+      return;
+    } catch (e) {
+      // Try next lighter tier
+    }
+  }
+  try {
+    const minimal = arr.slice(0, 150).map(r => {
+      const copy = Object.assign({}, r);
+      delete copy.photo;
+      delete copy.finalPhoto;
+      delete copy.signature;
+      return copy;
+    });
+    localStorage.setItem('maintReports', JSON.stringify(minimal));
+  } catch (err) {
+    console.warn('Local storage full; reports retained in memory and Firebase cloud.', err);
+  }
+}
+
+// Startup compaction if localStorage is already near 5MB quota
+try {
+  const existingRaw = localStorage.getItem('maintReports');
+  if (existingRaw && existingRaw.length > 3500000) {
+    saveReportsToStorage(JSON.parse(existingRaw));
+  }
+} catch (e) {}
 
 function saveLocal(report) {
-    const arr = getLocalReports();
-    const idx = arr.findIndex(r => r.id === report.id);
+    const base = reportsCache.length ? [...reportsCache] : getLocalReports();
+    const idx = base.findIndex(r => r.id === report.id);
 
     if (idx >= 0) {
-        arr[idx] = report;
+        base[idx] = report;
     } else {
-        arr.unshift(report);
+        base.unshift(report);
     }
 
-    reportsCache = arr;
-
-    try {
-        localStorage.setItem('maintReports', JSON.stringify(arr));
-    } catch (e) {
-        if (e.name === 'QuotaExceededError') {
-            console.warn(
-                'Local storage full. Report retained in memory; cloud save will be attempted.'
-            );
-            return;
-        }
-        throw e;
-    }
+    reportsCache = base;
+    saveReportsToStorage(base);
 }
 
 
@@ -714,12 +755,12 @@ async function updateReportField(id, fields) {
   const actor = window.currentUserName || (isAdmin() ? 'Admin' : 'Employee');
   if (!fields.lastUpdatedBy) fields = Object.assign({}, fields, { lastUpdatedBy: actor, lastUpdatedAt: new Date().toISOString() });
   // Update local first
-  const arr = getLocalReports();
+  const arr = reportsCache.length ? [...reportsCache] : getLocalReports();
   const r = arr.find(x => x.id === id);
   if (r) {
     Object.assign(r, fields);
-    localStorage.setItem('maintReports', JSON.stringify(arr));
     reportsCache = arr;
+    saveReportsToStorage(arr);
   }
   if (cloudMode && db && navigator.onLine) {
     try {
@@ -1210,9 +1251,14 @@ async function submitReport() {
   reportData.jobOrderReceived = false;
   try { reportData.finalPhoto = await composeFinalImage(); }
   catch { reportData.finalPhoto = reportData.photo; }
-  if (reportData.photo && reportData.photo.length > 400000) reportData.photo = await compressImage(reportData.photo, 0.55);
-  if (reportData.finalPhoto && reportData.finalPhoto.length > 500000) reportData.finalPhoto = await compressImage(reportData.finalPhoto, 0.6);
-  await saveReportToCloud({...reportData});
+  if (reportData.finalPhoto && reportData.finalPhoto.length > 180000) {
+    reportData.finalPhoto = await compressImage(reportData.finalPhoto, 0.65);
+  }
+  const payload = Object.assign({}, reportData, {
+    photo: null,
+    signature: null
+  });
+  await saveReportToCloud(payload);
   toast(t('reportSaved') + (cloudMode ? ' ☁️' : ''));
   resetReportFlow();
   goTo('home');
